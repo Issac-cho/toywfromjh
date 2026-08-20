@@ -20,6 +20,7 @@ export const metadata: Metadata = {
   title: "Couple Diary",
   description: "커플 추억 기록 다이어리 앱",
   manifest: "/manifest.json",
+  referrer: "origin",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
