@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db } from "@/lib/firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,18 +8,26 @@ import { useUserData } from "@/hooks/useUserData";
 import { Photo } from "@/types";
 import { ArrowLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { Container as MapDiv, NaverMap, Marker, useNavermaps } from "react-naver-maps";
+import Script from "next/script";
+
+declare global {
+  interface Window {
+    naver: any;
+  }
+}
 
 export default function MapPage() {
   const router = useRouter();
   const { userData } = useUserData();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [scriptLoaded, setScriptLoaded] = useState(false);
+  const mapRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
 
   useEffect(() => {
     if (!userData?.coupleId) return;
     
-    // 위치 정보가 있는 사진만 가져오기
     const fetchPhotos = async () => {
       const q = query(
         collection(db, "photos"),
@@ -28,33 +36,75 @@ export default function MapPage() {
       const snapshot = await getDocs(q);
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Photo[];
       
-      // 위치 데이터가 있는 것만 필터링
       setPhotos(fetched.filter(p => p.location));
     };
 
     fetchPhotos();
   }, [userData?.coupleId]);
 
+  useEffect(() => {
+    if (!scriptLoaded || !window.naver || !window.naver.maps) return;
+
+    // Initialize map
+    if (!mapRef.current) {
+      const defaultCenter = photos.length > 0 
+        ? new window.naver.maps.LatLng(photos[0].location!.lat, photos[0].location!.lng)
+        : new window.naver.maps.LatLng(37.5666805, 126.9784147);
+
+      mapRef.current = new window.naver.maps.Map("map", {
+        center: defaultCenter,
+        zoom: 13,
+      });
+    }
+
+    // Clear old markers
+    markersRef.current.forEach(marker => marker.setMap(null));
+    markersRef.current = [];
+
+    // Add new markers
+    photos.forEach(photo => {
+      const position = new window.naver.maps.LatLng(photo.location!.lat, photo.location!.lng);
+      const marker = new window.naver.maps.Marker({
+        position,
+        map: mapRef.current,
+        icon: {
+          content: `
+            <div style="background-color: white; padding: 2px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); cursor: pointer;">
+              <img src="${photo.type === 'image' ? photo.url : '/icons/icon-192x192.png'}" 
+                   style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;" />
+            </div>
+          `,
+          anchor: new window.naver.maps.Point(20, 20),
+        }
+      });
+
+      window.naver.maps.Event.addListener(marker, 'click', () => {
+        setSelectedPhoto(photo);
+      });
+
+      markersRef.current.push(marker);
+    });
+
+  }, [scriptLoaded, photos]);
+
   return (
     <div className="h-screen bg-gray-50 flex flex-col relative">
+      <Script 
+        src={`https://openapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID}`}
+        strategy="afterInteractive"
+        onLoad={() => setScriptLoaded(true)}
+      />
+
       <header className="absolute top-0 w-full bg-white/80 backdrop-blur-md shadow-sm z-10 px-4 py-4 flex items-center justify-between">
         <button onClick={() => router.push("/")} className="p-2 -ml-2 text-gray-600 hover:text-pink-500">
           <ArrowLeft size={24} />
         </button>
-        <h1 className="text-xl font-bold text-gray-800">데이트 지도</h1>
+        <h1 className="text-xl font-bold text-gray-800">우리의 지도</h1>
         <div className="w-8" />
       </header>
 
       <div className="flex-1 w-full h-full">
-        {/* NaverMap SDK Load */}
-        <MapDiv
-          style={{
-            width: "100%",
-            height: "100%",
-          }}
-        >
-          <NaverMapClient photos={photos} onMarkerClick={setSelectedPhoto} />
-        </MapDiv>
+        <div id="map" style={{ width: "100%", height: "100%" }} />
       </div>
 
       {selectedPhoto && (
@@ -85,39 +135,5 @@ export default function MapPage() {
         </div>
       )}
     </div>
-  );
-}
-
-// 지도 컴포넌트를 분리 (useNavermaps 훅을 쓰기 위해)
-function NaverMapClient({ photos, onMarkerClick }: { photos: Photo[], onMarkerClick: (p: Photo) => void }) {
-  const navermaps = useNavermaps();
-  
-  // 첫 번째 사진의 위치를 중심으로 설정, 없으면 서울 시청
-  const defaultCenter = photos.length > 0 
-    ? new navermaps.LatLng(photos[0].location!.lat, photos[0].location!.lng)
-    : new navermaps.LatLng(37.5666805, 126.9784147);
-
-  return (
-    <NaverMap
-      defaultCenter={defaultCenter}
-      defaultZoom={13}
-    >
-      {photos.map(photo => (
-        <Marker 
-          key={photo.id}
-          position={new navermaps.LatLng(photo.location!.lat, photo.location!.lng)}
-          onClick={() => onMarkerClick(photo)}
-          icon={{
-            content: `
-              <div style="background-color: white; padding: 2px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); cursor: pointer;">
-                <img src="${photo.type === 'image' ? photo.url : '/icons/icon-192x192.png'}" 
-                     style="width: 40px; height: 40px; border-radius: 50%; object-fit: cover;" />
-              </div>
-            `,
-            anchor: new navermaps.Point(20, 20),
-          }}
-        />
-      ))}
-    </NaverMap>
   );
 }
