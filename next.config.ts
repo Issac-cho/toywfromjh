@@ -7,19 +7,6 @@ const withPWA = withPWAInit({
 });
 
 const nextConfig: NextConfig = {
-  async headers() {
-    return [
-      {
-        source: "/(.*)",
-        headers: [
-          {
-            key: "Referrer-Policy",
-            value: "origin",
-          },
-        ],
-      },
-    ];
-  },
   turbopack: {},
   /* config options here */
 };
